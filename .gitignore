@@ -1,0 +1,20 @@
+# Environment variables
+.env
+
+# Python virtual environment
+poto-wanderercover/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE files
+.vscode/*
+!.vscode/tasks.json
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# OS specific
+.DS_Store
+Thumbs.db
