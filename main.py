@@ -1,6 +1,20 @@
 import RPi.GPIO as GPIO
 import time
+import serial
 from enum import Enum, auto
+
+# Serial command constants
+LID_CLOSED_CMD = b"1000"
+LID_OPEN_CMD = b"1001"
+
+BRIGHTNESS_OFF_CMD = b"9999"
+BRIGHTNESS_LOW_CMD = b"10"
+BRIGHTNESS_HIGH_CMD = b"100"
+
+HEATER_OFF_CMD = b"2000"
+HEATER_LOW_CMD = b"2050"
+HEATER_HIGH_CMD = b"2100"
+HEATER_MAX_CMD = b"2150"
 
 
 class SwitchPosition(Enum):
@@ -140,6 +154,59 @@ class HeaterSwitch(Switch):
         return None
 
 
+def dispatchToWandererCover(lid_status, brightness, heater):
+    global ser
+
+    # Try to connect if not connected
+    if ser is None:
+        if connect_serial():
+            print("Successfully reconnected to serial port")
+        else:
+            print("Serial communication not available, will retry next time")
+            return
+
+    try:
+        # Send lid status command
+        if lid_status == LidStatus.CLOSED:
+            ser.write(LID_CLOSED_CMD)
+            print(f"Sent lid command: {LID_CLOSED_CMD}")
+        elif lid_status == LidStatus.OPEN:
+            ser.write(LID_OPEN_CMD)
+            print(f"Sent lid command: {LID_OPEN_CMD}")
+
+        # Send brightness command
+        if brightness == Brightness.OFF:
+            ser.write(BRIGHTNESS_OFF_CMD)
+            print(f"Sent brightness command: {BRIGHTNESS_OFF_CMD}")
+        elif brightness == Brightness.LOW:
+            ser.write(BRIGHTNESS_LOW_CMD)
+            print(f"Sent brightness command: {BRIGHTNESS_LOW_CMD}")
+        elif brightness == Brightness.HIGH:
+            ser.write(BRIGHTNESS_HIGH_CMD)
+            print(f"Sent brightness command: {BRIGHTNESS_HIGH_CMD}")
+
+        # Send heater command
+        if heater == HeaterPower.OFF:
+            ser.write(HEATER_OFF_CMD)
+            print(f"Sent heater command: {HEATER_OFF_CMD}")
+        elif heater == HeaterPower.LOW:
+            ser.write(HEATER_LOW_CMD)
+            print(f"Sent heater command: {HEATER_LOW_CMD}")
+        elif heater == HeaterPower.HIGH:
+            ser.write(HEATER_HIGH_CMD)
+            print(f"Sent heater command: {HEATER_HIGH_CMD}")
+
+    except Exception as e:
+        print(f"Error communicating with device: {e}")
+        # Reset the connection to force a reconnect next time
+        try:
+            if ser:
+                ser.close()
+        except Exception:
+            pass
+        ser = None
+
+
 # Initialize GPIO
 GPIO.setmode(GPIO.BCM)
 
@@ -151,14 +218,48 @@ switches = [
 ]
 
 
+# Initialize serial connection
+ser = None
+serial_port = "/dev/ttyUSB0"
+baud_rate = 19200
+max_retries = 5
+retry_delay = 2  # Seconds between retry attempts
+
+
+def connect_serial():
+    """Attempt to connect to the serial port."""
+    global ser
+    if ser is not None:
+        return True
+
+    try:
+        ser = serial.Serial(serial_port, baud_rate, timeout=1)
+        print(f"Successfully connected to {serial_port}")
+        return True
+    except Exception as e:
+        print(f"Warning: Could not open serial port {serial_port}: {e}")
+        return False
+
+
+# Try to connect initially
+connect_serial()
+
+
 try:
     print("Reading switch positions. Press CTRL+C to exit.")
-    print("Lid positions: CLOSED (left/center), OPEN (right)")
-    print("Brightness: OFF (left), LOW (center), HIGH (right)")
-    print("Heater: OFF (left), LOW (center), HIGH (right)")
     print("\nStarting monitoring loop...\n")
 
+    last_connection_attempt = 0
+
     while True:
+        current_time = time.time()
+
+        # Try to reconnect periodically if no connection
+        if ser is None and (current_time - last_connection_attempt) > retry_delay:
+            print("Attempting to reconnect to serial port...")
+            connect_serial()
+            last_connection_attempt = current_time
+
         # Update all switch positions
         for switch in switches:
             switch.read()
@@ -169,16 +270,33 @@ try:
         brightness = switches[1].get_state_value()
         heater = switches[2].get_state_value()
 
-        # Example of using the states for control logic
-        if lid_status == LidStatus.OPEN:
-            print("Warning: Lid is open!")
+        # Dispatch the states to serial COM
+        dispatchToWandererCover(lid_status, brightness, heater)
 
-        if heater == HeaterPower.HIGH and brightness == Brightness.OFF:
-            print("Note: Heater is HIGH but lights are OFF")
+        # Read any incoming serial data
+        if ser and ser.in_waiting:
+            try:
+                received_data = ser.read(ser.in_waiting)
+                if received_data:
+                    print(f"Received from device: {received_data}")
+            except Exception as e:
+                print(f"Error reading from serial: {e}")
+                # Reset connection
+                try:
+                    if ser:
+                        ser.close()
+                except Exception:
+                    pass
+                ser = None
 
         print("---")
-        time.sleep(1)
+        time.sleep(2)
 except KeyboardInterrupt:
     print("\nExiting...")
 finally:
+    # Clean up GPIO
     GPIO.cleanup()
+    # Close serial connection if open
+    if ser:
+        ser.close()
+        print("Serial connection closed.")
