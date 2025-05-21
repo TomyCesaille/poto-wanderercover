@@ -2,6 +2,7 @@ import RPi.GPIO as GPIO
 import time
 import serial
 from enum import Enum, auto
+from collections import deque
 
 # Serial command constants
 LID_CLOSED_CMD = b"1000"
@@ -15,6 +16,18 @@ HEATER_OFF_CMD = b"2000"
 HEATER_LOW_CMD = b"2050"
 HEATER_HIGH_CMD = b"2100"
 HEATER_MAX_CMD = b"2150"
+
+# State tracking variables
+last_lid_status = None
+last_brightness = None
+last_heater = None
+command_queue = deque()
+waiting_for_response = False
+last_command_time = 0
+command_timeout = 3  # seconds
+first_message_received = (
+    False  # Flag to track if we've received the first message from the device
+)
 
 
 class SwitchPosition(Enum):
@@ -154,57 +167,91 @@ class HeaterSwitch(Switch):
         return None
 
 
+def check_for_state_changes(lid_status, brightness, heater):
+    """Check for changes in state and add commands to the queue if needed"""
+    global last_lid_status, last_brightness, last_heater, command_queue
+
+    # Check if this is the first run or if there are changes in lid status
+    if last_lid_status is None or last_lid_status != lid_status:
+        if lid_status == LidStatus.CLOSED:
+            command_queue.append((LID_CLOSED_CMD, "Lid: CLOSED"))
+        elif lid_status == LidStatus.OPEN:
+            command_queue.append((LID_OPEN_CMD, "Lid: OPEN"))
+        last_lid_status = lid_status
+
+    # Check for changes in brightness
+    if last_brightness is None or last_brightness != brightness:
+        if brightness == Brightness.OFF:
+            command_queue.append((BRIGHTNESS_OFF_CMD, "Brightness: OFF"))
+        elif brightness == Brightness.LOW:
+            command_queue.append((BRIGHTNESS_LOW_CMD, "Brightness: LOW"))
+        elif brightness == Brightness.HIGH:
+            command_queue.append((BRIGHTNESS_HIGH_CMD, "Brightness: HIGH"))
+        last_brightness = brightness
+
+    # Check for changes in heater
+    if last_heater is None or last_heater != heater:
+        if heater == HeaterPower.OFF:
+            command_queue.append((HEATER_OFF_CMD, "Heater: OFF"))
+        elif heater == HeaterPower.LOW:
+            command_queue.append((HEATER_LOW_CMD, "Heater: LOW"))
+        elif heater == HeaterPower.HIGH:
+            command_queue.append((HEATER_HIGH_CMD, "Heater: HIGH"))
+        last_heater = heater
+
+
+def process_command_queue():
+    """Process the next command in the queue if possible"""
+    global ser, command_queue, waiting_for_response, last_command_time, first_message_received
+
+    # Don't send any commands until we've received the first message from the device
+    if not first_message_received:
+        return
+
+    # If we're waiting for a response but it's been too long, timeout
+    current_time = time.time()
+    if waiting_for_response and (current_time - last_command_time) > command_timeout:
+        print(f"Command timed out after {command_timeout} seconds, continuing...")
+        waiting_for_response = False
+
+    # If we're not currently waiting for a response and have commands to send
+    if not waiting_for_response and command_queue and ser is not None:
+        try:
+            command, description = command_queue.popleft()
+            ser.write(command)
+            print(f"Sent command: {command} ({description})")
+            waiting_for_response = True
+            last_command_time = current_time
+        except Exception as e:
+            print(f"Error sending command: {e}")
+            # Reset the connection to force a reconnect next time
+            try:
+                if ser:
+                    ser.close()
+            except Exception:
+                pass
+            ser = None
+
+
 def dispatchToWandererCover(lid_status, brightness, heater):
+    """Add any changed states to the command queue"""
     global ser
 
     # Try to connect if not connected
     if ser is None:
         if connect_serial():
             print("Successfully reconnected to serial port")
+            # Force all states to be resent after reconnection
+            global last_lid_status, last_brightness, last_heater
+            last_lid_status = None
+            last_brightness = None
+            last_heater = None
         else:
             print("Serial communication not available, will retry next time")
             return
 
-    try:
-        # Send lid status command
-        if lid_status == LidStatus.CLOSED:
-            ser.write(LID_CLOSED_CMD)
-            print(f"Sent lid command: {LID_CLOSED_CMD}")
-        elif lid_status == LidStatus.OPEN:
-            ser.write(LID_OPEN_CMD)
-            print(f"Sent lid command: {LID_OPEN_CMD}")
-
-        # Send brightness command
-        if brightness == Brightness.OFF:
-            ser.write(BRIGHTNESS_OFF_CMD)
-            print(f"Sent brightness command: {BRIGHTNESS_OFF_CMD}")
-        elif brightness == Brightness.LOW:
-            ser.write(BRIGHTNESS_LOW_CMD)
-            print(f"Sent brightness command: {BRIGHTNESS_LOW_CMD}")
-        elif brightness == Brightness.HIGH:
-            ser.write(BRIGHTNESS_HIGH_CMD)
-            print(f"Sent brightness command: {BRIGHTNESS_HIGH_CMD}")
-
-        # Send heater command
-        if heater == HeaterPower.OFF:
-            ser.write(HEATER_OFF_CMD)
-            print(f"Sent heater command: {HEATER_OFF_CMD}")
-        elif heater == HeaterPower.LOW:
-            ser.write(HEATER_LOW_CMD)
-            print(f"Sent heater command: {HEATER_LOW_CMD}")
-        elif heater == HeaterPower.HIGH:
-            ser.write(HEATER_HIGH_CMD)
-            print(f"Sent heater command: {HEATER_HIGH_CMD}")
-
-    except Exception as e:
-        print(f"Error communicating with device: {e}")
-        # Reset the connection to force a reconnect next time
-        try:
-            if ser:
-                ser.close()
-        except Exception:
-            pass
-        ser = None
+    # Check for state changes and add to queue
+    check_for_state_changes(lid_status, brightness, heater)
 
 
 # Initialize GPIO
@@ -216,7 +263,6 @@ switches = [
     BrightnessSwitch("Brightness", 22, 23),
     HeaterSwitch("Heater", 24, 25),
 ]
-
 
 # Initialize serial connection
 ser = None
@@ -244,10 +290,10 @@ def connect_serial():
 # Try to connect initially
 connect_serial()
 
-
 try:
     print("Reading switch positions. Press CTRL+C to exit.")
     print("\nStarting monitoring loop...\n")
+    print("Waiting for first message from device before sending any commands...")
 
     last_connection_attempt = 0
 
@@ -270,8 +316,11 @@ try:
         brightness = switches[1].get_state_value()
         heater = switches[2].get_state_value()
 
-        # Dispatch the states to serial COM
+        # Check for state changes and add to command queue
         dispatchToWandererCover(lid_status, brightness, heater)
+
+        # Process next command in queue if we're not waiting for a response
+        process_command_queue()
 
         # Read any incoming serial data
         if ser and ser.in_waiting:
@@ -279,6 +328,13 @@ try:
                 received_data = ser.read(ser.in_waiting)
                 if received_data:
                     print(f"Received from device: {received_data}")
+                    if not first_message_received:
+                        first_message_received = True
+                        print(
+                            "First message received from device, now ready to send commands"
+                        )
+                    waiting_for_response = False
+                    process_command_queue()
             except Exception as e:
                 print(f"Error reading from serial: {e}")
                 # Reset connection
@@ -290,7 +346,7 @@ try:
                 ser = None
 
         print("---")
-        time.sleep(2)
+        time.sleep(1)
 except KeyboardInterrupt:
     print("\nExiting...")
 finally:
