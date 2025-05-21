@@ -12,7 +12,7 @@ python --version
 
 sudo apt-get install python3-pip python3-venv
 
-python3 -m venv poto-wanderercover
+python -m venv poto-wanderercover
 source poto-wanderercover/bin/activate
 ```
 
@@ -23,23 +23,11 @@ Since we [can't code remotely with VS Code](https://github.com/microsoft/vscode-
 - Write the code here
 - Mirror the project to the pi using `rsync`
 
-### Initial Configuration
-
-Before using either method below, set up your connection details:
-
-1. Copy `.env.example` to `.env` and update it with your Raspberry Pi settings:
-
-   ```env
-   PI_USER=your_username
-   PI_HOST=your_raspberry_pi_ip
-   PI_REMOTE_PATH=/home/your_username/your_project_path
-   ```
-
 ### Manual rsync command
 
 ```bash
 # (remove --dry-run when ready)
-rsync -avz --delete --exclude='/poto-wanderercover/' --dry-run ./ tom@192.168.10.112:/home/tom/poto-wanderercover/
+rsync -avzcu --delete --exclude='/poto-wanderercover/' --dry-run ./ tom@192.168.10.112:/home/tom/poto-wanderercover/
 ```
 
 NOTE: Windows users, please use WSL to run the rsync command.
