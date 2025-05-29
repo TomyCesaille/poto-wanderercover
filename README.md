@@ -27,7 +27,7 @@ Since we [can't code remotely with VS Code](https://github.com/microsoft/vscode-
 
 ```bash
 # (remove --dry-run when ready)
-rsync -avzcu --delete --exclude='/poto-wanderercover/' --dry-run ./ tom@192.168.10.112:/home/tom/poto-wanderercover/
+rsync -avzcu --delete --exclude='/poto-wanderercover/' --exclude='/__pycache__/' --dry-run ./ tom@192.168.10.112:/home/tom/poto-wanderercover/
 ```
 
 NOTE: Windows users, please use WSL to run the rsync command.
@@ -47,5 +47,6 @@ pip install -r requirements.txt
 From the raspberry pi zero w, run the following command to execute the code:
 
 ```bash
+source poto-wanderercover/bin/activate
 python main.py
 ```
