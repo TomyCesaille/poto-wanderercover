@@ -19,13 +19,13 @@ def _parse_wanderer_status_message(status_message: Never) -> dict:
     Returns a dictionary with the parsed values or `{"done": True}` for done feedback or None if parsing fails.
     """
     if isinstance(status_message, bytes):
-        status_message = status_message.decode("utf-8", errors="replace")
+        status_message_str = status_message.decode("utf-8", errors="ignore")
     else:
         print(f"[STATUS] ERROR: Not an expected bytes type: {type(status_message)}")
         return None
 
     # Not expecting multiple messages as we're using ser.readline(), but handling last message in case.
-    message = status_message.strip().split("\r\n")[-1]
+    message = status_message_str.strip().split("\r\n")[-1]
 
     # It's undocumented, but the device sends "done" when it has finished moving the lid.
     if message == "done":
@@ -56,14 +56,10 @@ def print_wanderer_status_message(status_message: Never) -> None:
     """
     Print the status message from the WandererCover device in a nice format.
     """
-    parsed_data = _parse_wanderer_status_message(status_message)
-
-    if not parsed_data:
+    status = _parse_wanderer_status_message(status_message)
+    if not status:
         print("Could not parse status message.")
         return
-
-    # Only print the latest status if multiple messages are received
-    status = parsed_data[-1]
 
     print("\n=== WandererCover Status ============")
     print(f"Hardware:         {status['hardware']}")

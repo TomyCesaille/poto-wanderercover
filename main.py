@@ -153,7 +153,7 @@ class DewHeaterSwitch(Switch):
 def connect_serial_if_needed(ser: serial.Serial) -> serial.Serial | None:
     """Connect to serial if disconnected."""
     if ser is not None:
-        return True
+        return ser
 
     serial_port = "/dev/ttyUSB0"
 
