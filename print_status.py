@@ -2,7 +2,7 @@ import re
 from typing import Never
 
 
-def _parse_wanderer_status_message(status_message: Never) -> dict:
+def _parse_wanderer_status_message(status_message: Never) -> dict | None:
     """
     Parse the status message from the WandererCover device.
 
@@ -61,6 +61,12 @@ def print_wanderer_status_message(status_message: Never) -> None:
         print("Could not parse status message.")
         return
 
+    if "done" in status:
+        print("\n=== WandererCover Status ============")
+        print("The WandererCover reported the command `done` ◕◡◕.")
+        print("=======================================\n")
+        return
+
     print("\n=== WandererCover Status ============")
     print(f"Hardware:         {status['hardware']}")
     print(f"Firmware Version: {status['firmware']}")
@@ -71,7 +77,7 @@ def print_wanderer_status_message(status_message: Never) -> None:
     print(f"Flat Panel:       {status['brightness']}")
     print(f"Dew Heater:       {status['heater']}")
     print(f"Undocumented:     {status['undocumented_thing']}")
-    print("=======================================\n")
+    print("=======================================")
 
 
 def print_switches_state(
@@ -82,8 +88,8 @@ def print_switches_state(
     """
     Print the input state of the WandererCover device.
     """
-    print("\n=== WandererCover Status ============")
+    print("\n=== Poto-WandererCover Status =========")
     print(f"Open/Close Switch: {openclose_switch_state}")
     print(f"Brightness Switch: {brightness_switch_state}")
     print(f"Dew Heater Switch: {dew_heater_switch_state}")
-    print("=======================================\n")
+    print("=======================================")

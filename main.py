@@ -2,6 +2,7 @@ import RPi.GPIO as GPIO
 import time
 import serial
 from enum import Enum, auto
+import traceback
 
 from print_status import print_wanderer_status_message, print_switches_state
 
@@ -169,19 +170,21 @@ def connect_serial_if_needed(ser: serial.Serial) -> serial.Serial | None:
         print(f"Reading on port {ser.portstr} at {ser.baudrate} baud")
         return ser
     except Exception as e:
-        print(f"Warning: Could not open serial port {serial_port} ({ser.portstr}): {e}")
+        print(
+            f"Warning: Could not open serial port {serial_port} ({ser.portstr}): {traceback.format_exc(e)}"
+        )
         return None
 
 
 # Allow the wanderer hardware to initialize.
 print("starting in 4 seconds...")
-time.sleep(1)
+# time.sleep(1)
 print("starting in 3 seconds...")
-time.sleep(1)
+# time.sleep(1)
 print("starting in 2 seconds...")
-time.sleep(1)
+# time.sleep(1)
 print("starting in 1 second...")
-time.sleep(1)
+# time.sleep(1)
 
 print("\nStarting the routine...\n")
 
@@ -266,14 +269,14 @@ try:
             last_dew_heater_switch_state = dew_heater_switch_state
             command_sent = True
 
-        print(f"[{current_time}] ---")
+        print(f"[{current_time}] #################")
         time.sleep(1)
 except KeyboardInterrupt:
     print(f"\n[{current_time}] Read loop stopped by user. Exiting...")
 except serial.SerialException as e:
-    print(f"[{current_time}] Serial error: {e}")
+    print(f"[{current_time}] Serial error: {traceback.format_exc(e)}")
 except Exception as e:
-    print(f"[{current_time}] An unexpected error occurred: {e}")
+    print(f"[{current_time}] An unexpected error occurred: {traceback.format_exc(e)}")
 finally:
     # Clean up GPIO
     GPIO.cleanup()
