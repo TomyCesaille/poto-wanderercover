@@ -24,6 +24,8 @@ last_openclose_switch_state = None
 last_brightness_switch_state = None
 last_dew_heater_switch_state = None
 
+GPIO.setmode(GPIO.BCM)
+
 
 class SwitchPosition(Enum):
     """Enum for the physical positions of a 3-way switch."""
@@ -188,8 +190,6 @@ print("starting in 1 second...")
 
 print("\nStarting the routine...\n")
 
-GPIO.setmode(GPIO.BCM)
-
 switches = [
     CoverSwitch("Lid", 17, 27),
     BrightnessSwitch("Brightness", 22, 23),
@@ -228,7 +228,7 @@ try:
             openclose_switch_state, brightness_switch_state, dew_heater_switch_state
         )
 
-        # Send 1 command from this loop, if the state has changed.
+        # Send 1 command from this loop, if the switch state has changed.
         command_sent = False
         if openclose_switch_state != last_openclose_switch_state:
             if openclose_switch_state == LidStatus.OPEN:
@@ -278,9 +278,7 @@ except serial.SerialException as e:
 except Exception as e:
     print(f"[{current_time}] An unexpected error occurred: {traceback.format_exc(e)}")
 finally:
-    # Clean up GPIO
     GPIO.cleanup()
-    # Close serial connection if open
     if ser:
         ser.close()
         print(f"[{current_time}] Serial connection closed.")
