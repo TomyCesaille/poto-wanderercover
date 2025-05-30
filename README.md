@@ -27,7 +27,7 @@ Since we [can't code remotely with VS Code](https://github.com/microsoft/vscode-
 
 ```bash
 # (remove --dry-run when ready)
-rsync -avzcu --delete --exclude='/poto-wanderercover/' --exclude='/__pycache__/' --dry-run ./ tom@192.168.10.112:/home/tom/poto-wanderercover/
+rsync -avzcu --delete --exclude='/poto-wanderercover/' --exclude='/__pycache__/' --exclude='/.mypy_cache/' --dry-run ./ tom@192.168.10.112:/home/tom/poto-wanderercover/
 ```
 
 NOTE: Windows users, please use WSL to run the rsync command.
@@ -49,4 +49,25 @@ From the raspberry pi zero w, run the following command to execute the code:
 ```bash
 source poto-wanderercover/bin/activate
 python main.py
+```
+
+## Type checking & Linter
+
+From ubuntu (WSL or native), run the following commands to check the types:
+
+```bash
+apt install python3-venv
+python3 -m venv poto-wanderercover
+
+# Activate the virtual environment
+source poto-wanderercover/bin/activate
+
+# Install dependencies
+pip install -r requirements-dev.txt
+
+# Run type checking
+mypy .
+
+# Run linter
+ruff check .
 ```

@@ -1,7 +1,8 @@
-import RPi.GPIO as GPIO
-import time
-import serial
 from enum import Enum, auto
+from typing import Literal
+import RPi.GPIO as GPIO
+import serial
+import time
 import traceback
 
 from print_status import print_wanderer_status_message, print_switches_state
@@ -18,11 +19,6 @@ HEATER_OFF_CMD = b"2000"
 HEATER_LOW_CMD = b"2050"
 HEATER_HIGH_CMD = b"2100"
 HEATER_MAX_CMD = b"2150"
-
-# State tracking variables.
-last_openclose_switch_state = None
-last_brightness_switch_state = None
-last_dew_heater_switch_state = None
 
 GPIO.setmode(GPIO.BCM)
 
@@ -64,7 +60,7 @@ class Switch:
     Represents a 3-position switch connected to two GPIO pins.
     """
 
-    def __init__(self, name, pin_a, pin_b, switch_type=None):
+    def __init__(self, name: str, pin_a: int, pin_b: int, switch_type=None) -> None:
         """
         Initialize a new switch.
 
@@ -83,7 +79,14 @@ class Switch:
         GPIO.setup(pin_a, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.setup(pin_b, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
-    def read(self):
+    def read(
+        self,
+    ) -> Literal[
+        SwitchPosition.POSITION1,
+        SwitchPosition.POSITION2,
+        SwitchPosition.CENTER,
+        SwitchPosition.INVALID,
+    ]:
         a = GPIO.input(self.pin_a)
         b = GPIO.input(self.pin_b)
 
@@ -110,7 +113,7 @@ class Switch:
         """Get the functional state value. To be implemented by subclasses."""
         return None
 
-    def __str__(self):
+    def __str__(self) -> str:
         state = self.get_state_value()
         state_str = f" → {state.name}" if state else ""
         return f"{self.name}: {self.get_position_string()}{state_str}"
@@ -119,7 +122,7 @@ class Switch:
 class CoverSwitch(Switch):
     """Switch controlling the open/close position."""
 
-    def get_state_value(self):
+    def get_state_value(self) -> LidStatus:
         if self.position == SwitchPosition.POSITION2:
             return LidStatus.OPEN
         else:
@@ -130,30 +133,26 @@ class CoverSwitch(Switch):
 class BrightnessSwitch(Switch):
     """Switch controlling the brightness level."""
 
-    def get_state_value(self):
+    def get_state_value(self) -> Brightness:
         if self.position == SwitchPosition.POSITION1:
             return Brightness.OFF
         elif self.position == SwitchPosition.CENTER:
             return Brightness.LOW
-        elif self.position == SwitchPosition.POSITION2:
-            return Brightness.HIGH
-        return None
+        return Brightness.HIGH
 
 
 class DewHeaterSwitch(Switch):
     """Switch controlling the dew heater power."""
 
-    def get_state_value(self):
+    def get_state_value(self) -> HeaterPower:
         if self.position == SwitchPosition.POSITION1:
             return HeaterPower.OFF
         elif self.position == SwitchPosition.CENTER:
             return HeaterPower.LOW
-        elif self.position == SwitchPosition.POSITION2:
-            return HeaterPower.HIGH
-        return None
+        return HeaterPower.HIGH
 
 
-def connect_serial_if_needed(ser: serial.Serial) -> serial.Serial | None:
+def connect_serial_if_needed(ser: serial.Serial | None) -> serial.Serial | None:
     """Connect to serial if disconnected."""
     if ser is not None:
         return ser
@@ -171,9 +170,9 @@ def connect_serial_if_needed(ser: serial.Serial) -> serial.Serial | None:
         )
         print(f"Reading on port {ser.portstr} at {ser.baudrate} baud")
         return ser
-    except Exception as e:
+    except Exception:
         print(
-            f"Warning: Could not open serial port {serial_port} ({ser.portstr}): {traceback.format_exc(e)}"
+            f"Warning: Could not open serial port {serial_port}: {traceback.format_exc()}"
         )
         return None
 
@@ -197,6 +196,7 @@ switches = [
 ]
 
 ser = None
+next_command: Literal["cover", "brightness", "dew_heater"] = "cover"
 
 try:
     while True:
@@ -215,10 +215,10 @@ try:
         if not hardware_status_raw:
             print(f"[{current_time}] No data received from serial port.")
             continue
-        else:
-            print_wanderer_status_message(hardware_status_raw)
 
-        # Update all switch positions.
+        print_wanderer_status_message(hardware_status_raw)
+
+        # Read GPIO switch positions.
         for switch in switches:
             switch.read()
         openclose_switch_state = switches[0].get_state_value()
@@ -228,9 +228,15 @@ try:
             openclose_switch_state, brightness_switch_state, dew_heater_switch_state
         )
 
-        # Send 1 command from this loop, if the switch state has changed.
-        command_sent = False
-        if openclose_switch_state != last_openclose_switch_state:
+        # Send 1 command to the WandererCover device per loop iteration.
+
+        # The WandererCover device is quite stateful.
+        # E.G. not accepting brightness commands when lid is open or moving.
+        # Or it turns off the light when the lid opens.
+        # Instead of tracking the actual state of the hardware,
+        # we simply republish our commands regularly as it's easier and harmless.
+
+        if next_command == "cover":
             if openclose_switch_state == LidStatus.OPEN:
                 print(f"[{current_time}] Sending command to open lid.")
                 ser.write(LID_OPEN_CMD)
@@ -238,10 +244,7 @@ try:
                 print(f"[{current_time}] Sending command to close lid.")
                 ser.write(LID_CLOSE_CMD)
 
-            last_openclose_switch_state = openclose_switch_state
-            command_sent = True
-
-        if not command_sent and brightness_switch_state != last_brightness_switch_state:
+        if next_command == "brightness":
             if brightness_switch_state == Brightness.OFF:
                 print(f"[{current_time}] Sending command to turn off lights.")
                 ser.write(BRIGHTNESS_OFF_CMD)
@@ -252,10 +255,7 @@ try:
                 print(f"[{current_time}] Sending command for high brightness.")
                 ser.write(BRIGHTNESS_HIGH_CMD)
 
-            last_brightness_switch_state = brightness_switch_state
-            command_sent = True
-
-        if not command_sent and dew_heater_switch_state != last_dew_heater_switch_state:
+        if next_command == "dew_heater":
             if dew_heater_switch_state == HeaterPower.OFF:
                 print(f"[{current_time}] Sending command to turn off heater.")
                 ser.write(HEATER_OFF_CMD)
@@ -266,17 +266,22 @@ try:
                 print(f"[{current_time}] Sending command for high heater power.")
                 ser.write(HEATER_HIGH_CMD)
 
-            last_dew_heater_switch_state = dew_heater_switch_state
-            command_sent = True
+        # Rotate the next command to send.
+        if next_command == "cover":
+            next_command = "brightness"
+        elif next_command == "brightness":
+            next_command = "dew_heater"
+        else:
+            next_command = "cover"
 
         print(f"[{current_time}] #################")
         time.sleep(1)
 except KeyboardInterrupt:
     print(f"\n[{current_time}] Read loop stopped by user. Exiting...")
-except serial.SerialException as e:
-    print(f"[{current_time}] Serial error: {traceback.format_exc(e)}")
-except Exception as e:
-    print(f"[{current_time}] An unexpected error occurred: {traceback.format_exc(e)}")
+except serial.SerialException:
+    print(f"[{current_time}] Serial error: {traceback.format_exc()}")
+except Exception:
+    print(f"[{current_time}] An unexpected error occurred: {traceback.format_exc()}")
 finally:
     GPIO.cleanup()
     if ser:

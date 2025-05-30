@@ -1,5 +1,6 @@
 import RPi.GPIO as GPIO
 import time
+from typing import Literal
 
 SWITCH_PINS = [
     (17, 27),  # Switch 1
@@ -15,7 +16,9 @@ for pin_pair in SWITCH_PINS:
         GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
 
-def read_switch(pin_a, pin_b):
+def read_switch(
+    pin_a: int, pin_b: int
+) -> Literal["Position 1", "Position 2", "Center (OFF)", "Invalid (both HIGH)"]:
     a = GPIO.input(pin_a)
     b = GPIO.input(pin_b)
     if a and not b:

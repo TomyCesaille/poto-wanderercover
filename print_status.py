@@ -1,8 +1,7 @@
 import re
-from typing import Never
 
 
-def _parse_wanderer_status_message(status_message: Never) -> dict | None:
+def _parse_wanderer_status_message(status_message: bytes) -> dict | None:
     """
     Parse the status message from the WandererCover device.
 
@@ -28,6 +27,7 @@ def _parse_wanderer_status_message(status_message: Never) -> dict | None:
     message = status_message_str.strip().split("\r\n")[-1]
 
     # It's undocumented, but the device sends "done" when it has finished moving the lid.
+    # But, this is quite unreliable, it's sometimes not sent ¯\_(ツ)_/¯.
     if message == "done":
         return {"done": True}
 
@@ -52,20 +52,21 @@ def _parse_wanderer_status_message(status_message: Never) -> dict | None:
         return None
 
 
-def print_wanderer_status_message(status_message: Never) -> None:
+def print_wanderer_status_message(status_message: bytes) -> bool | None:
     """
     Print the status message from the WandererCover device in a nice format.
+    Return True if the status was `done`, otherwise False. None if parsing fails.
     """
     status = _parse_wanderer_status_message(status_message)
     if not status:
         print("Could not parse status message.")
-        return
+        return None
 
     if "done" in status:
         print("\n=== WandererCover Status ============")
-        print("The WandererCover reported the command `done` ◕◡◕.")
+        print("The WandererCover reported the command `done` ✅.")
         print("=======================================\n")
-        return
+        return True
 
     print("\n=== WandererCover Status ============")
     print(f"Hardware:         {status['hardware']}")
@@ -78,6 +79,8 @@ def print_wanderer_status_message(status_message: Never) -> None:
     print(f"Dew Heater:       {status['heater']}")
     print(f"Undocumented:     {status['undocumented_thing']}")
     print("=======================================")
+
+    return False
 
 
 def print_switches_state(

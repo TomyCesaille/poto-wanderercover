@@ -1,0 +1,4 @@
+mypy
+ruff
+types-pyserial
+types-RPi.GPIO
