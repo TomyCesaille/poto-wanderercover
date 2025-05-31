@@ -5,7 +5,11 @@ import serial
 import time
 import traceback
 
-from print_status import print_wanderer_status_message, print_switches_state
+from utils_statuses import (
+    parse_wanderer_status_message,
+    print_wanderer_status_message,
+    print_switches_state,
+)
 
 # Serial command constants.F
 LID_CLOSE_CMD = b"1000"
@@ -196,7 +200,15 @@ switches = [
 ]
 
 ser = None
-next_command: Literal["cover", "brightness", "dew_heater"] = "cover"
+# Remember the last switch states to avoid sending duplicate commands.
+last_openclose_switch_state = None
+last_brightness_switch_state = None
+last_dew_heater_switch_state = None
+# Flags to determine if we should repush commands.
+# We need to, once the lid gets fully closed as these commands are ignored by the hardware when the lid is moving/open.
+lid_closed = False
+should_repush_brightness_command = False
+should_repush_heater_command = False
 
 try:
     while True:
@@ -216,7 +228,8 @@ try:
             print(f"[{current_time}] No data received from serial port.")
             continue
 
-        print_wanderer_status_message(hardware_status_raw)
+        wanderer_status = parse_wanderer_status_message(hardware_status_raw)
+        print_wanderer_status_message(wanderer_status)
 
         # Read GPIO switch positions.
         for switch in switches:
@@ -228,51 +241,65 @@ try:
             openclose_switch_state, brightness_switch_state, dew_heater_switch_state
         )
 
-        # Send 1 command to the WandererCover device per loop iteration.
+        # Check if the hardware just closed the lid.
+        if wanderer_status and openclose_switch_state == LidStatus.CLOSED:
+            current_pos = float(wanderer_status.get("current_position", "0"))
+            close_pos = float(wanderer_status.get("close_position", "0"))
+            if abs(current_pos - close_pos) <= 1 and not lid_closed:
+                print(
+                    f"[{current_time}] 🌠Lid is fully closed (within 1° margin). Resetting repush flags."
+                )
+                should_repush_brightness_command = should_repush_heater_command = True
+                lid_closed = True
+        else:
+            should_repush_brightness_command = should_repush_heater_command = False
+        if wanderer_status and openclose_switch_state == LidStatus.OPEN:
+            lid_closed = False
 
-        # The WandererCover device is quite stateful.
-        # E.G. not accepting brightness commands when lid is open or moving.
-        # Or it turns off the light when the lid opens.
-        # Instead of tracking the actual state of the hardware,
-        # we simply republish our commands regularly as it's easier and harmless.
-
-        if next_command == "cover":
+        # Send 1 command from this loop, if the switch state has changed.
+        command_sent = False
+        if openclose_switch_state != last_openclose_switch_state:
             if openclose_switch_state == LidStatus.OPEN:
-                print(f"[{current_time}] Sending command to open lid.")
+                print(f"[{current_time}] 👉Sending command to open lid.")
                 ser.write(LID_OPEN_CMD)
             else:
-                print(f"[{current_time}] Sending command to close lid.")
+                print(f"[{current_time}] 👉Sending command to close lid.")
                 ser.write(LID_CLOSE_CMD)
+            last_openclose_switch_state = openclose_switch_state
+            command_sent = True
 
-        if next_command == "brightness":
+        if not command_sent and (
+            brightness_switch_state != last_brightness_switch_state
+            or should_repush_brightness_command
+        ):
             if brightness_switch_state == Brightness.OFF:
-                print(f"[{current_time}] Sending command to turn off lights.")
+                print(f"[{current_time}] 👉Sending command to turn off lights.")
                 ser.write(BRIGHTNESS_OFF_CMD)
             elif brightness_switch_state == Brightness.LOW:
-                print(f"[{current_time}] Sending command for low brightness.")
+                print(f"[{current_time}] 👉Sending command for low brightness.")
                 ser.write(BRIGHTNESS_LOW_CMD)
-            elif brightness_switch_state == Brightness.HIGH:
-                print(f"[{current_time}] Sending command for high brightness.")
+            else:
+                print(f"[{current_time}] 👉Sending command for high brightness.")
                 ser.write(BRIGHTNESS_HIGH_CMD)
+            last_brightness_switch_state = brightness_switch_state
+            should_repush_brightness_command = False
+            command_sent = True
 
-        if next_command == "dew_heater":
+        if not command_sent and (
+            dew_heater_switch_state != last_dew_heater_switch_state
+            or should_repush_heater_command
+        ):
             if dew_heater_switch_state == HeaterPower.OFF:
-                print(f"[{current_time}] Sending command to turn off heater.")
+                print(f"[{current_time}] 👉Sending command to turn off heater.")
                 ser.write(HEATER_OFF_CMD)
             elif dew_heater_switch_state == HeaterPower.LOW:
-                print(f"[{current_time}] Sending command for low heater power.")
+                print(f"[{current_time}] 👉Sending command for low heater power.")
                 ser.write(HEATER_LOW_CMD)
-            elif dew_heater_switch_state == HeaterPower.HIGH:
-                print(f"[{current_time}] Sending command for high heater power.")
+            else:
+                print(f"[{current_time}] 👉Sending command for high heater power.")
                 ser.write(HEATER_HIGH_CMD)
-
-        # Rotate the next command to send.
-        if next_command == "cover":
-            next_command = "brightness"
-        elif next_command == "brightness":
-            next_command = "dew_heater"
-        else:
-            next_command = "cover"
+            last_dew_heater_switch_state = dew_heater_switch_state
+            should_repush_heater_command = False
 
         print(f"[{current_time}] #################")
         time.sleep(1)

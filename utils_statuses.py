@@ -1,7 +1,9 @@
 import re
 
 
-def _parse_wanderer_status_message(status_message: bytes) -> dict | None:
+def parse_wanderer_status_message(
+    status_message: bytes,
+) -> dict[str, str | float | int] | None:
     """
     Parse the status message from the WandererCover device.
 
@@ -27,7 +29,7 @@ def _parse_wanderer_status_message(status_message: bytes) -> dict | None:
     message = status_message_str.strip().split("\r\n")[-1]
 
     # It's undocumented, but the device sends "done" when it has finished moving the lid.
-    # But, this is quite unreliable, it's sometimes not sent ¯\_(ツ)_/¯.
+    # However, this is quite unreliable. It's sometimes coming super late or never sent ¯\_(ツ)_/¯.
     if message == "done":
         return {"done": True}
 
@@ -40,7 +42,7 @@ def _parse_wanderer_status_message(status_message: bytes) -> dict | None:
             "firmware": match.group(2),
             "close_position": match.group(3),
             "open_position": match.group(4),
-            "current_position": match.group(5),
+            "current_position": match.group(5),  # Also not reliable.
             "voltage": match.group(6),
             "brightness": match.group(7),
             "heater": match.group(8),
@@ -52,12 +54,11 @@ def _parse_wanderer_status_message(status_message: bytes) -> dict | None:
         return None
 
 
-def print_wanderer_status_message(status_message: bytes) -> bool | None:
+def print_wanderer_status_message(status: dict | None) -> bool | None:
     """
     Print the status message from the WandererCover device in a nice format.
     Return True if the status was `done`, otherwise False. None if parsing fails.
     """
-    status = _parse_wanderer_status_message(status_message)
     if not status:
         print("Could not parse status message.")
         return None
