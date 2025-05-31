@@ -1,7 +1,7 @@
 import re
 
 
-def parse_wanderer_status_message(
+def _parse_wanderer_status_message(
     status_message: bytes,
 ) -> dict[str, str | float | int] | None:
     """
@@ -54,11 +54,15 @@ def parse_wanderer_status_message(
         return None
 
 
-def print_wanderer_status_message(status: dict | None) -> bool | None:
+def print_wanderer_status_message(
+    status_message: bytes,
+) -> bool | None:
     """
     Print the status message from the WandererCover device in a nice format.
     Return True if the status was `done`, otherwise False. None if parsing fails.
     """
+    status = _parse_wanderer_status_message(status_message)
+
     if not status:
         print("Could not parse status message.")
         return None

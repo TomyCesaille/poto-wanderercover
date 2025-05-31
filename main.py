@@ -6,7 +6,6 @@ import time
 import traceback
 
 from utils_statuses import (
-    parse_wanderer_status_message,
     print_wanderer_status_message,
     print_switches_state,
 )
@@ -206,9 +205,7 @@ last_brightness_switch_state = None
 last_dew_heater_switch_state = None
 # Flags to determine if we should repush commands.
 # We need to, once the lid gets fully closed as these commands are ignored by the hardware when the lid is moving/open.
-lid_closed = False
-should_repush_brightness_command = False
-should_repush_heater_command = False
+lid_close_command_time = None  # Time when close lid command was sent
 
 try:
     while True:
@@ -228,8 +225,7 @@ try:
             print(f"[{current_time}] No data received from serial port.")
             continue
 
-        wanderer_status = parse_wanderer_status_message(hardware_status_raw)
-        print_wanderer_status_message(wanderer_status)
+        print_wanderer_status_message(hardware_status_raw)
 
         # Read GPIO switch positions.
         for switch in switches:
@@ -241,65 +237,67 @@ try:
             openclose_switch_state, brightness_switch_state, dew_heater_switch_state
         )
 
-        # Check if the hardware just closed the lid.
-        if wanderer_status and openclose_switch_state == LidStatus.CLOSED:
-            current_pos = float(wanderer_status.get("current_position", "0"))
-            close_pos = float(wanderer_status.get("close_position", "0"))
-            if abs(current_pos - close_pos) <= 1 and not lid_closed:
-                print(
-                    f"[{current_time}] 🌠Lid is fully closed (within 1° margin). Resetting repush flags."
-                )
-                should_repush_brightness_command = should_repush_heater_command = True
-                lid_closed = True
-        else:
-            should_repush_brightness_command = should_repush_heater_command = False
-        if wanderer_status and openclose_switch_state == LidStatus.OPEN:
-            lid_closed = False
+        # Check if it's time to force retrigger brightness and heater commands.
+        if lid_close_command_time is not None:
+            time_since_close = time.time() - lid_close_command_time
+            if time_since_close >= 10:  # 10 seconds have passed.
+                print(f"[{current_time}] ⏱️ 10 seconds since lid close command.")
+                # Change the brightness and Heater states to force retrigger.
+                if last_brightness_switch_state == HeaterPower.OFF:
+                    last_brightness_switch_state = Brightness.LOW
+                else:
+                    last_brightness_switch_state = Brightness.OFF
+                if last_dew_heater_switch_state == HeaterPower.OFF:
+                    last_dew_heater_switch_state = Brightness.LOW
+                else:
+                    last_dew_heater_switch_state = Brightness.OFF
+
+                # Reset the timer so we don't do this again.
+                lid_close_command_time = None
 
         # Send 1 command from this loop, if the switch state has changed.
         command_sent = False
         if openclose_switch_state != last_openclose_switch_state:
             if openclose_switch_state == LidStatus.OPEN:
-                print(f"[{current_time}] 👉Sending command to open lid.")
+                print(f"[{current_time}] 👉 Sending command to open lid.")
                 ser.write(LID_OPEN_CMD)
+                # Reset the lid close timer when opening
+                lid_close_command_time = None
             else:
-                print(f"[{current_time}] 👉Sending command to close lid.")
+                print(f"[{current_time}] 👉 Sending command to close lid.")
                 ser.write(LID_CLOSE_CMD)
+                # Start tracking time since close command
+                lid_close_command_time = time.time()
+                print(
+                    f"[{current_time}] ⏱️ Started 10-second timer for brightness/heater reset."
+                )
             last_openclose_switch_state = openclose_switch_state
             command_sent = True
 
-        if not command_sent and (
-            brightness_switch_state != last_brightness_switch_state
-            or should_repush_brightness_command
-        ):
+        if not command_sent and brightness_switch_state != last_brightness_switch_state:
             if brightness_switch_state == Brightness.OFF:
-                print(f"[{current_time}] 👉Sending command to turn off lights.")
+                print(f"[{current_time}] 👉 Sending command to turn off lights.")
                 ser.write(BRIGHTNESS_OFF_CMD)
             elif brightness_switch_state == Brightness.LOW:
-                print(f"[{current_time}] 👉Sending command for low brightness.")
+                print(f"[{current_time}] 👉 Sending command for low brightness.")
                 ser.write(BRIGHTNESS_LOW_CMD)
             else:
-                print(f"[{current_time}] 👉Sending command for high brightness.")
+                print(f"[{current_time}] 👉 Sending command for high brightness.")
                 ser.write(BRIGHTNESS_HIGH_CMD)
             last_brightness_switch_state = brightness_switch_state
-            should_repush_brightness_command = False
             command_sent = True
 
-        if not command_sent and (
-            dew_heater_switch_state != last_dew_heater_switch_state
-            or should_repush_heater_command
-        ):
+        if not command_sent and dew_heater_switch_state != last_dew_heater_switch_state:
             if dew_heater_switch_state == HeaterPower.OFF:
-                print(f"[{current_time}] 👉Sending command to turn off heater.")
+                print(f"[{current_time}] 👉 Sending command to turn off heater.")
                 ser.write(HEATER_OFF_CMD)
             elif dew_heater_switch_state == HeaterPower.LOW:
-                print(f"[{current_time}] 👉Sending command for low heater power.")
+                print(f"[{current_time}] 👉 Sending command for low heater power.")
                 ser.write(HEATER_LOW_CMD)
             else:
-                print(f"[{current_time}] 👉Sending command for high heater power.")
+                print(f"[{current_time}] 👉 Sending command for high heater power.")
                 ser.write(HEATER_HIGH_CMD)
             last_dew_heater_switch_state = dew_heater_switch_state
-            should_repush_heater_command = False
 
         print(f"[{current_time}] #################")
         time.sleep(1)
