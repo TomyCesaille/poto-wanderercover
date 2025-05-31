@@ -10,7 +10,12 @@ from utils_statuses import (
     print_switches_state,
 )
 
-# Serial command constants.F
+# Constants
+# seconds. Before we can send brightness and heater commands again after closing the lid.
+# We need to repush commands as they are ignored by the hardware when the lid is moving/open.
+TIME_TO_WAIT_AFTER_CLOSE = 20
+
+# Serial command constants.
 LID_CLOSE_CMD = b"1000"
 LID_OPEN_CMD = b"1001"
 
@@ -203,9 +208,7 @@ ser = None
 last_openclose_switch_state = None
 last_brightness_switch_state = None
 last_dew_heater_switch_state = None
-# Flags to determine if we should repush commands.
-# We need to, once the lid gets fully closed as these commands are ignored by the hardware when the lid is moving/open.
-lid_close_command_time = None  # Time when close lid command was sent
+lid_close_command_time = None  # Time when close lid command was sent.
 
 try:
     while True:
@@ -240,17 +243,30 @@ try:
         # Check if it's time to force retrigger brightness and heater commands.
         if lid_close_command_time is not None:
             time_since_close = time.time() - lid_close_command_time
-            if time_since_close >= 10:  # 10 seconds have passed.
-                print(f"[{current_time}] ⏱️ 10 seconds since lid close command.")
-                # Change the brightness and Heater states to force retrigger.
-                if last_brightness_switch_state == HeaterPower.OFF:
+            time_remaining = TIME_TO_WAIT_AFTER_CLOSE - time_since_close
+
+            print(f"[{current_time}] ⏱️ Time since close: {time_since_close:.1f}s")
+
+            if time_since_close >= TIME_TO_WAIT_AFTER_CLOSE:
+                print(
+                    f"[{current_time}] ⏱️ {TIME_TO_WAIT_AFTER_CLOSE} seconds since lid close command."
+                )
+
+                # Toggle brightness state using correct enum types.
+                if last_brightness_switch_state == Brightness.OFF:
                     last_brightness_switch_state = Brightness.LOW
                 else:
                     last_brightness_switch_state = Brightness.OFF
+
+                # Toggle heater state using correct enum types.
                 if last_dew_heater_switch_state == HeaterPower.OFF:
-                    last_dew_heater_switch_state = Brightness.LOW
+                    last_dew_heater_switch_state = HeaterPower.LOW
                 else:
-                    last_dew_heater_switch_state = Brightness.OFF
+                    last_dew_heater_switch_state = HeaterPower.OFF
+
+                print(
+                    f"[{current_time}] 🔄 Toggled brightness and heater states to force retrigger."
+                )
 
                 # Reset the timer so we don't do this again.
                 lid_close_command_time = None
@@ -261,15 +277,15 @@ try:
             if openclose_switch_state == LidStatus.OPEN:
                 print(f"[{current_time}] 👉 Sending command to open lid.")
                 ser.write(LID_OPEN_CMD)
-                # Reset the lid close timer when opening
+                # Reset the lid close timer when opening.
                 lid_close_command_time = None
             else:
                 print(f"[{current_time}] 👉 Sending command to close lid.")
                 ser.write(LID_CLOSE_CMD)
-                # Start tracking time since close command
+                # Start tracking time since close command.
                 lid_close_command_time = time.time()
                 print(
-                    f"[{current_time}] ⏱️ Started 10-second timer for brightness/heater reset."
+                    f"[{current_time}] ⏱️ Started {TIME_TO_WAIT_AFTER_CLOSE}-second timer for brightness/heater reset."
                 )
             last_openclose_switch_state = openclose_switch_state
             command_sent = True
