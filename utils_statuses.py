@@ -46,7 +46,9 @@ def _parse_wanderer_status_message(
             "voltage": match.group(6),
             "brightness": match.group(7),
             "heater": match.group(8),
-            "undocumented_thing": match.group(9),  # Yeah it's there, but what is it?
+            "undocumented_thing": match.group(
+                9
+            ),  # Undocumented field with unknown purpose.
         }
         return status
     else:

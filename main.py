@@ -11,7 +11,7 @@ from utils_statuses import (
 )
 
 # Constants
-# seconds. Before we can send brightness and heater commands again after closing the lid.
+# Seconds before we can send brightness and heater commands again after closing the lid.
 # We need to repush commands as they are ignored by the hardware when the lid is moving/open.
 TIME_TO_WAIT_AFTER_CLOSE = 20
 
@@ -83,7 +83,7 @@ class Switch:
         self.pin_b = pin_b
         self.position = SwitchPosition.CENTER
         self.switch_type = switch_type
-        # Setup the pins
+        # Setup the pins.
         GPIO.setup(pin_a, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.setup(pin_b, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
@@ -277,7 +277,7 @@ try:
             if openclose_switch_state == LidStatus.OPEN:
                 print(f"[{current_time}] 👉 Sending command to open lid.")
                 ser.write(LID_OPEN_CMD)
-                # Reset the lid close timer when opening.
+                # Reset the lid close timer when opening lid.
                 lid_close_command_time = None
             else:
                 print(f"[{current_time}] 👉 Sending command to close lid.")
