@@ -208,7 +208,10 @@ ser = None
 last_openclose_switch_state = None
 last_brightness_switch_state = None
 last_dew_heater_switch_state = None
-lid_close_command_time = None  # Time when close lid command was sent.
+lid_movement_start_time = None  # Time when lid movement started (open or close)
+pending_openclose_switch_state = (
+    None  # Store any pending open/close command during lid movement
+)
 
 try:
     while True:
@@ -217,7 +220,7 @@ try:
         ser = connect_serial_if_needed(ser)
 
         if ser is None:
-            print(f"[{current_time}] Serial connection not established. Retrying...")
+            print(f"[{current_time}] 🔴 Serial connection not established. Retrying...")
             time.sleep(2)
             continue
 
@@ -225,7 +228,7 @@ try:
         # Receiving a status message from the WandererCover device means that it is ready to take a command.
         hardware_status_raw = ser.readline()
         if not hardware_status_raw:
-            print(f"[{current_time}] No data received from serial port.")
+            print(f"[{current_time}] ⚠️ No data received from serial port.")
             continue
 
         print_wanderer_status_message(hardware_status_raw)
@@ -240,55 +243,60 @@ try:
             openclose_switch_state, brightness_switch_state, dew_heater_switch_state
         )
 
-        # Check if it's time to force retrigger brightness and heater commands.
-        if lid_close_command_time is not None:
-            time_since_close = time.time() - lid_close_command_time
-            time_remaining = TIME_TO_WAIT_AFTER_CLOSE - time_since_close
+        # Check if it's time to force retrigger brightness, heater, and open/close commands.
+        if lid_movement_start_time is not None:
+            time_since_movement = time.time() - lid_movement_start_time
+            time_remaining = TIME_TO_WAIT_AFTER_CLOSE - time_since_movement
 
-            print(f"[{current_time}] ⏱️ Time since close: {time_since_close:.1f}s")
+            print(f"[{current_time}] ⏱️ Lid moving: {time_since_movement:.1f}s")
 
-            if time_since_close >= TIME_TO_WAIT_AFTER_CLOSE:
+            # Check if the open/close switch state has changed from what was last sent
+            if openclose_switch_state != last_openclose_switch_state:
+                # Store the current switch state to be applied after the waiting period.
+                pending_openclose_switch_state = openclose_switch_state
                 print(
-                    f"[{current_time}] ⏱️ {TIME_TO_WAIT_AFTER_CLOSE} seconds since lid close command."
+                    f"[{current_time}] 🔄 Switch change during movement. Will apply after wait."
                 )
 
-                # Toggle brightness state using correct enum types.
-                if last_brightness_switch_state == Brightness.OFF:
-                    last_brightness_switch_state = Brightness.LOW
-                else:
-                    last_brightness_switch_state = Brightness.OFF
+            if time_since_movement >= TIME_TO_WAIT_AFTER_CLOSE:
+                print(
+                    f"[{current_time}] ⏱️ {TIME_TO_WAIT_AFTER_CLOSE}s since lid movement started."
+                )
 
-                # Toggle heater state using correct enum types.
-                if last_dew_heater_switch_state == HeaterPower.OFF:
-                    last_dew_heater_switch_state = HeaterPower.LOW
-                else:
-                    last_dew_heater_switch_state = HeaterPower.OFF
-
+                # Reset states to force sending commands again.
                 print(
                     f"[{current_time}] 🔄 Toggled brightness and heater states to force retrigger."
                 )
+                last_brightness_switch_state = None
+                last_dew_heater_switch_state = None
+
+                # If there's a pending open/close command that was received during the lid movement.
+                if pending_openclose_switch_state is not None:
+                    print(f"[{current_time}] 🔄 Applying pending switch change.")
+                    # Reset last_openclose_switch_state to force the command to be sent.
+                    last_openclose_switch_state = None
+                    pending_openclose_switch_state = None
 
                 # Reset the timer so we don't do this again.
-                lid_close_command_time = None
+                lid_movement_start_time = None
 
-        # Send 1 command from this loop, if the switch state has changed.
+        # Send 1 command from this loop.
         command_sent = False
         if openclose_switch_state != last_openclose_switch_state:
             if openclose_switch_state == LidStatus.OPEN:
                 print(f"[{current_time}] 👉 Sending command to open lid.")
                 ser.write(LID_OPEN_CMD)
-                # Reset the lid close timer when opening lid.
-                lid_close_command_time = None
             else:
                 print(f"[{current_time}] 👉 Sending command to close lid.")
                 ser.write(LID_CLOSE_CMD)
-                # Start tracking time since close command.
-                lid_close_command_time = time.time()
-                print(
-                    f"[{current_time}] ⏱️ Started {TIME_TO_WAIT_AFTER_CLOSE}-second timer for brightness/heater reset."
-                )
+
             last_openclose_switch_state = openclose_switch_state
             command_sent = True
+            # Start tracking time since movement started.
+            lid_movement_start_time = time.time()
+            print(
+                f"[{current_time}] ⏱️ Started {TIME_TO_WAIT_AFTER_CLOSE}s timer for lid movement."
+            )            
 
         if not command_sent and brightness_switch_state != last_brightness_switch_state:
             if brightness_switch_state == Brightness.OFF:
